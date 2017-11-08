@@ -214,7 +214,7 @@ class FullyConnectedLayer(Layer, Parameterized):
     def bprop(self, output_grad):
         if self.activation_fun is not None:
             output_grad = self.activation_fun.bprop(output_grad)
-        self.db = np.mean(output_grad, axis=0)
+        self.db = np.sum(output_grad, axis=0)
         self.dW = np.dot(np.transpose(self.last_input), output_grad)
         grad_input = np.dot(output_grad, np.transpose(self.W))
         return grad_input
@@ -246,7 +246,7 @@ class LinearOutput(Layer, Loss):
         raise NotImplementedError("bprop cannot be called for an output layer.")
 
     def input_grad(self, Y, Y_pred):
-        return Y - Y_pred
+        return Y_pred - Y
 
     def loss(self, Y, Y_pred):
         loss = 0.5 * np.square(Y - Y_pred)
@@ -271,14 +271,14 @@ class SoftmaxOutput(Layer, Loss):
         raise NotImplementedError("bprop cannot be called for an output layer.")
 
     def input_grad(self, Y, Y_pred):
-        return Y - Y_pred
+        return Y_pred - Y
 
     def loss(self, Y, Y_pred):
         out = softmax(Y_pred)
         # Add epsilon in the log to make loss numerically stable
         eps = 1e-10
         # Assume one-hot encoding of Y
-        loss = -np.log(np.max(Y * Y_pred, axis=1) + eps)
+        loss = -np.log(np.max(Y * out, axis=1) + eps)
         return np.mean(loss)
 
 
@@ -327,22 +327,22 @@ class NeuralNetwork:
             X_batch = X[batch_indices]
             Y_batch = Y[batch_indices]
             Y_pred = self.predict(X_batch)
-            gradient = self.backpropagate(Y_batch, Y_pred)
+            self.backpropagate(Y_batch, Y_pred)
             # TODO: Make learning rate go to zero? How fast?
             for i in range(1, len(self.layers) - 1):
-                weighted_params = tuple(map(lambda p: learning_rate * p,
-                                            self.layers[i].grad_params()))
-                self.layers[i].set_params(*weighted_params)
+                updated_params = tuple(map(lambda p, g: p - learning_rate * g,
+                    zip(self.layers[i].params(), self.layers[i].grad_params())))
+                self.layers[i].set_params(*updated_params)
 
     def gd_epoch(self, X, Y, learning_rate):
         """ Perform gradient descent to update network parameters.
         """
         Y_pred = self.predict(X)
-        gradient = self.backpropagate(Y, Y_pred)
+        self.backpropagate(Y, Y_pred)
         for i in range(1, len(self.layers) - 1):
-            weighted_params = tuple(map(lambda p: learning_rate * p,
-                                        self.layers[i].grad_params()))
-            self.layers[i].set_params(*weighted_params)
+            updated_params = tuple(map(lambda (p, g): p - learning_rate * g,
+                zip(self.layers[i].params(), self.layers[i].grad_params())))
+            self.layers[i].set_params(*updated_params)
 
     def train(self, X, Y, X_valid, Y_valid, learning_rate=0.1, max_epochs=100,
               batch_size=64, descent_type="sgd", y_one_hot=True):
@@ -396,21 +396,38 @@ class NeuralNetwork:
                    
                     param_init = np.ravel(np.copy(param))
                     epsilon = 1e-4
+                    gparam_fd = np.zeros_like(param_init)
+                    gparam_bprop = np.zeros_like(param_init)
+
+                    for i in range(param_init.shape[0]):
+                        param_init[i] += epsilon
+                        gparam_fd[i] = output_given_params(param_init)
+                        param_init[i] -= epsilon
+                        gparam_fd[i] -= output_given_params(param_init)
+                        gparam_fd[i] /= epsilon
+                        gparam_bprop[i] = grad_given_params(param_init)[i]
+
+                    # print("gparam_fd:    ", gparam_fd)
+                    # print("gparam_bprop: ", gparam_bprop)
+                    err_mean = np.mean(np.abs(gparam_bprop - gparam_fd))
+                    err_l2 = np.sqrt(np.sum(np.square(gparam_bprop - gparam_fd)))
+                    print("diff (mean)    {:.2e}".format(err_mean))
+                    print("diff (l2-norm) {:.2e}".format(err_l2))
+
                     # import scipy.optimize
-                    # err = scipy.optimize.check_grad(
-                    #         output_given_params, grad_given_params, param_init)
-                    gparam_fd = (output_given_params(param_init + epsilon) -
-                                 output_given_params(param_init)) / epsilon
-                    gparam_bprop = grad_given_params(param_init)
-                    err = np.mean(np.abs(gparam_bprop - gparam_fd))
-                    print("diff {:.2e}".format(err))
-                    assert(err < epsilon)
+                    # err_scipy = scipy.optimize.check_grad(
+                    #         output_given_params, grad_given_params, param_init,
+                    #         epsilon=epsilon)
+                    # print("diff (scipy)    {:.2e}".format(err_scipy))
+                    # print
+
+                    # assert(err_mean < epsilon)
 
                     # reset parameters
                     param[:] = np.reshape(param_init, param_shape)
 
 
-def test_on_random_data():
+def check_gradient_on_random_data():
     input_shape = (50, 10)
     n_labels = 6
 
@@ -423,7 +440,13 @@ def test_on_random_data():
     ))
     layers.append(FullyConnectedLayer(
             layers[-1],
-            num_units=6,
+            num_units=n_labels,
+            init_stddev=0.1,
+            activation_fun=Activation("relu")
+    ))
+    layers.append(FullyConnectedLayer(
+            layers[-1],
+            num_units=n_labels,
             init_stddev=0.1,
             activation_fun=Activation("tanh")
     ))
@@ -432,6 +455,24 @@ def test_on_random_data():
             num_units=n_labels,
             init_stddev=0.1,
             activation_fun=Activation("relu")
+    ))
+    layers.append(FullyConnectedLayer(
+            layers[-1],
+            num_units=n_labels,
+            init_stddev=0.1,
+            activation_fun=Activation("relu")
+    ))
+    layers.append(FullyConnectedLayer(
+            layers[-1],
+            num_units=n_labels,
+            init_stddev=0.1,
+            activation_fun=Activation("relu")
+    ))
+    layers.append(FullyConnectedLayer(
+            layers[-1],
+            num_units=n_labels,
+            init_stddev=0.1,
+            activation_fun=None
     ))
     layers.append(SoftmaxOutput(layers[-1]))
     nn = NeuralNetwork(layers)
@@ -457,16 +498,17 @@ def test_on_random_data():
     #          max_epochs=20, batch_size=64, descent_type="gd", y_one_hot=True)
 
 
-def evaluate_on_mnist():
+def evaluate_on_mnist(random_subset=False):
     d_train, d_val, d_test = mnist()
     X_train, y_train = d_train
     X_valid, y_valid = d_val
 
-    # # Downsample data to make it a bit faster
-    # n_train_samples = 10000
-    # train_idxs = np.random.permutation(X_train.shape[0])[:n_train_samples]
-    # X_train = X_train[train_idxs]
-    # y_train = y_train[train_idxs]
+    if random_subset:
+        # Downsample data to make it a bit faster
+        n_train_samples = 10000
+        train_idxs = np.random.permutation(X_train.shape[0])[:n_train_samples]
+        X_train = X_train[train_idxs]
+        y_train = y_train[train_idxs]
 
     print("X_train shape: {}".format(np.shape(X_train)))
     print("y_train shape: {}".format(np.shape(y_train)))
@@ -513,11 +555,12 @@ def evaluate_on_mnist():
 
     t0 = time.time()
     nn.train(X_train, y_train, X_valid, y_valid, learning_rate=0.1,
-             max_epochs=10, batch_size=64, descent_type="gd", y_one_hot=True)
+             max_epochs=20, batch_size=64, descent_type="gd", y_one_hot=True)
     t1 = time.time()
     print("Duration: {:.1f}s".format(t1-t0))
 
 
 if __name__ == "__main__":
-    test_on_random_data()
+    check_gradient_on_random_data()
+    # evaluate_on_mnist(True)
 
