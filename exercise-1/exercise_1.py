@@ -185,17 +185,18 @@ class FullyConnectedLayer(Layer, Parameterized):
     """
 
     def __init__ (self, input_layer, num_units, init_stddev,
-                  activation_fun=Activation("relu")):
+                  activation_fun=Activation("relu"), seed=None):
+        self.random_state = np.random.RandomState(seed)
         self.num_units = num_units
         self.activation_fun = activation_fun
         # input shape has the form (batch_size, num_units_prev)
         # where num_units_prev is the number of units in the input layer
         self.input_shape = input_layer.output_size()
         # weight matrix of shape (num_units_prev, num_units)
-        self.W = np.random.normal(size=(self.input_shape[1], num_units),
-                                  scale=init_stddev)
+        self.W = self.random_state.normal(size=(self.input_shape[1], num_units),
+                                          scale=init_stddev)
         # bias vector of shape (num_units)
-        self.b = np.random.normal(size=num_units, scale=init_stddev)
+        self.b = self.random_state.normal(size=num_units, scale=init_stddev)
         # dummy variables for parameter gradients
         self.dW = None
         self.db = None
@@ -246,7 +247,7 @@ class LinearOutput(Layer, Loss):
         raise NotImplementedError("bprop cannot be called for an output layer.")
 
     def input_grad(self, Y, Y_pred):
-        return Y_pred - Y
+        return (Y_pred - Y) / Y_pred.shape[0]
 
     def loss(self, Y, Y_pred):
         loss = 0.5 * np.square(Y - Y_pred)
@@ -271,14 +272,13 @@ class SoftmaxOutput(Layer, Loss):
         raise NotImplementedError("bprop cannot be called for an output layer.")
 
     def input_grad(self, Y, Y_pred):
-        return Y_pred - Y
+        return (Y_pred - Y) / Y_pred.shape[0]
 
     def loss(self, Y, Y_pred):
-        out = softmax(Y_pred)
         # Add epsilon in the log to make loss numerically stable
         eps = 1e-10
         # Assume one-hot encoding of Y
-        loss = -np.log(np.max(Y * out, axis=1) + eps)
+        loss = -np.log(np.max(Y * Y_pred, axis=1) + eps)
         return np.mean(loss)
 
 
@@ -317,6 +317,15 @@ class NeuralNetwork:
         error = Y_pred != Y
         return np.mean(error)
 
+    def gd_step(self, learning_rate):
+        """ Update weights in all layers by making a gradient descent step
+        of given length. Gradients must first be computed using backpropagation.
+        """
+        for i in range(1, len(self.layers) - 1):
+            updated_params = tuple(map(lambda (p, g): p - learning_rate * g,
+                zip(self.layers[i].params(), self.layers[i].grad_params())))
+            self.layers[i].set_params(*updated_params)
+
     def sgd_epoch(self, X, Y, learning_rate, batch_size):
         """ Perform stochastic gradient descent to update network parameters.
         """
@@ -328,25 +337,18 @@ class NeuralNetwork:
             Y_batch = Y[batch_indices]
             Y_pred = self.predict(X_batch)
             self.backpropagate(Y_batch, Y_pred)
-            # TODO: Make learning rate go to zero? How fast?
-            for i in range(1, len(self.layers) - 1):
-                updated_params = tuple(map(lambda p, g: p - learning_rate * g,
-                    zip(self.layers[i].params(), self.layers[i].grad_params())))
-                self.layers[i].set_params(*updated_params)
+            self.gd_step(learning_rate)
 
     def gd_epoch(self, X, Y, learning_rate):
-        """ Perform gradient descent to update network parameters.
-        """
+        """ Perform gradient descent to update network parameters. """
         Y_pred = self.predict(X)
         self.backpropagate(Y, Y_pred)
-        for i in range(1, len(self.layers) - 1):
-            updated_params = tuple(map(lambda (p, g): p - learning_rate * g,
-                zip(self.layers[i].params(), self.layers[i].grad_params())))
-            self.layers[i].set_params(*updated_params)
+        self.gd_step(learning_rate)
 
     def train(self, X, Y, X_valid, Y_valid, learning_rate=0.1, max_epochs=100,
-              batch_size=64, descent_type="sgd", y_one_hot=True):
-        """ Train network on the given data. """
+              batch_size=64, descent_type="sgd", y_one_hot=True,
+              validation_error_threshold=0.03):
+        """ Train network on the given data and return results. """
         if y_one_hot:
             Y_train = one_hot(Y)
         else:
@@ -369,50 +371,73 @@ class NeuralNetwork:
                   "validation error {:.4f}"
                   .format(e, train_loss, train_error, valid_error))
 
+            # If validation error is below threshold, stop optimization
+            if valid_error <= validation_error_threshold:
+                break
+        return (train_loss, train_error, valid_error)
+
     def check_gradients(self, X, Y):
         """ Helper function to test the parameter gradients for correctness.
+        
+        I implemented a more efficient approach than the one suggested in the
+        code stub. My approach doesn't constantly ravel and reshape paramters
+        (which involves copying the whole ndarrays in every iteration), but
+        instead increments and decrements a single parameter value by epsilon
+        (in place) in each iteration.
+
         """
+        average_diff_mean = 0
+        average_diff_l2 = 0
+        num_measurements = 0
+
         for l, layer in enumerate(self.layers):
             if isinstance(layer, Parameterized):
                 print('checking gradient for layer {}'.format(l))
                 for p, param in enumerate(layer.params()):
-                    param_shape = param.shape
+                    gparam_fd = np.empty(param.shape)
+                    gparam_bprop = np.empty(param.shape)
+                    epsilon = 1e-4
 
-                    def output_given_params(param_new):
-                        """ A function that will compute the output of
-                            the network given a set of parameters.
-                        """
-                        param[:] = np.reshape(param_new, param_shape)
-                        return self._loss(X, Y)
-                   
-                    def grad_given_params(param_new):
-                        """ A function that will compute the gradient of the
-                            network given a set of parameters
-                        """
-                        param[:] = np.reshape(param_new, param_shape)
+                    for i in np.ndindex(param.shape):
+                        # Compute gradient numerically (finite differences)
+                        param[i] += epsilon
+                        gparam_fd[i] = self._loss(X, Y)
+                        param[i] -= epsilon
+                        gparam_fd[i] -= self._loss(X, Y)
+                        gparam_fd[i] /= epsilon
+
+                        # Compute gradient analytically (by backpropagation)
                         Y_pred = self.predict(X)
                         self.backpropagate(Y, Y_pred, upto=l)
-                        return np.ravel(self.layers[l].grad_params()[p])
-                   
-                    param_init = np.ravel(np.copy(param))
-                    epsilon = 1e-4
-                    gparam_fd = np.zeros_like(param_init)
-                    gparam_bprop = np.zeros_like(param_init)
+                        gparam_bprop[i] = self.layers[l].grad_params()[p][i]
 
-                    for i in range(param_init.shape[0]):
-                        param_init[i] += epsilon
-                        gparam_fd[i] = output_given_params(param_init)
-                        param_init[i] -= epsilon
-                        gparam_fd[i] -= output_given_params(param_init)
-                        gparam_fd[i] /= epsilon
-                        gparam_bprop[i] = grad_given_params(param_init)[i]
-
-                    # print("gparam_fd:    ", gparam_fd)
-                    # print("gparam_bprop: ", gparam_bprop)
                     err_mean = np.mean(np.abs(gparam_bprop - gparam_fd))
                     err_l2 = np.sqrt(np.sum(np.square(gparam_bprop - gparam_fd)))
                     print("diff (mean)    {:.2e}".format(err_mean))
                     print("diff (l2-norm) {:.2e}".format(err_l2))
+                    assert err_mean < epsilon, "Incorrect gradient found!"
+
+                    average_diff_mean += err_mean
+                    average_diff_l2 += err_l2
+                    num_measurements += 1
+
+                    """
+                    The following code (commented out) is the scipy version.
+                    Gives the same output as the l2-norm error calculated above.
+                    """
+
+                    # param_shape = param.shape
+                    # param_init = np.ravel(np.copy(param))
+
+                    # def output_given_params(param_new):
+                    #     param[:] = np.reshape(param_new, param_shape)
+                    #     return self._loss(X, Y)
+
+                    # def grad_given_params(param_new):
+                    #     param[:] = np.reshape(param_new, param_shape)
+                    #     Y_pred = self.predict(X)
+                    #     self.backpropagate(Y, Y_pred, upto=l)
+                    #     return np.ravel(self.layers[l].grad_params()[p])
 
                     # import scipy.optimize
                     # err_scipy = scipy.optimize.check_grad(
@@ -420,147 +445,145 @@ class NeuralNetwork:
                     #         epsilon=epsilon)
                     # print("diff (scipy)    {:.2e}".format(err_scipy))
                     # print
+                    # param[:] = np.reshape(param_init, param_shape)
 
-                    # assert(err_mean < epsilon)
+        average_diff_mean /= num_measurements
+        average_diff_l2 /= num_measurements
+        print
+        print("average diff (mean)    {:.2e}".format(average_diff_mean))
+        print("average diff (l2-norm) {:.2e}".format(average_diff_l2))
 
-                    # reset parameters
-                    param[:] = np.reshape(param_init, param_shape)
+
+def create_neural_network(layer_specifications, input_shape,
+        output_type=SoftmaxOutput, init_stddev=0.01, seed=None):
+    """ Create a neural network with given specifications. """
+    layers = [InputLayer(input_shape)]
+    for layer_spec in layer_specifications:
+        layers.append(FullyConnectedLayer(
+            layers[-1],
+            num_units=layer_spec["num_units"],
+            init_stddev=init_stddev,
+            activation_fun=Activation(layer_spec["activation_fun"]) \
+                       if layer_spec["activation_fun"] is not None else None,
+            seed=seed
+        ))
+    layers.append(output_type(layers[-1]))
+    return NeuralNetwork(layers)
 
 
-def check_gradient_on_random_data():
+def check_gradient_on_random_data(seed=None):
+    """ Perform some gradient checking on random data. """
     input_shape = (50, 10)
     n_labels = 6
+    layer_specifications = [
+        { "num_units": 15, "activation_fun": "relu" },
+        { "num_units": 10, "activation_fun": "relu" },
+        { "num_units": 10, "activation_fun": "relu" },
+        { "num_units": 10, "activation_fun": "relu" },
+        { "num_units": 10, "activation_fun": "relu" },
+        { "num_units": 10, "activation_fun": "relu" },
+        { "num_units": n_labels, "activation_fun": None }
+    ]
+    nn = create_neural_network(layer_specifications, input_shape, seed=seed)
 
-    layers = [InputLayer(input_shape)]
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=15,
-            init_stddev=0.1,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=Activation("tanh")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=n_labels,
-            init_stddev=0.1,
-            activation_fun=None
-    ))
-    layers.append(SoftmaxOutput(layers[-1]))
-    nn = NeuralNetwork(layers)
-
-    X = np.random.normal(size=input_shape)
+    random_state = np.random.RandomState(seed)
+    X = random_state.normal(size=input_shape)
     y = np.zeros((input_shape[0], n_labels))
     for i in range(y.shape[0]):
-        idx = np.random.randint(n_labels)
+        idx = random_state.randint(n_labels)
         y[i, idx] = 1.
 
     nn.check_gradients(X, y)
 
-    # y = unhot(y)
-    # valid_shape = (20, 10)
-    # X_valid = np.random.normal(size=valid_shape)
-    # y_valid = np.zeros((valid_shape[0], n_labels))
-    # for i in range(y_valid.shape[0]):
-    #     idx = np.random.randint(n_labels)
-    #     y_valid[i, idx] = 1.
-    # y_valid = unhot(y_valid)
 
-    # nn.train(X, y, X_valid, y_valid, learning_rate=0.1,
-    #          max_epochs=20, batch_size=64, descent_type="gd", y_one_hot=True)
-
-
-def evaluate_on_mnist(random_subset=False):
+def evaluate_on_mnist(
+        subset_size=None, evaluate_on_testset=False, csvfile=None, seed=None):
+    """ Train a pre-specified network on the MNIST data (or a subset thereof)
+    and print training and validation results (and test results if flag is set).
+    """
+    # Load MNIST data
     d_train, d_val, d_test = mnist()
     X_train, y_train = d_train
     X_valid, y_valid = d_val
 
-    if random_subset:
-        # Downsample data to make it a bit faster
-        n_train_samples = 10000
-        train_idxs = np.random.permutation(X_train.shape[0])[:n_train_samples]
+    # If subset size is given, downsample data to make it a bit faster
+    if subset_size is not None:
+        n_train_samples = subset_size
+        random_state = np.random.RandomState(seed)
+        train_idxs = random_state.permutation(X_train.shape[0])[:n_train_samples]
         X_train = X_train[train_idxs]
         y_train = y_train[train_idxs]
 
+    # Reshape data
     print("X_train shape: {}".format(np.shape(X_train)))
     print("y_train shape: {}".format(np.shape(y_train)))
     X_train = X_train.reshape((X_train.shape[0], -1))
     print("Reshaped X_train size: {}".format(X_train.shape))
     X_valid = X_valid.reshape((X_valid.shape[0], -1))
     print("Reshaped X_valid size: {}".format(X_valid.shape))
-
     input_shape = (None, 28 * 28)
-    init_stddev = 0.01
-    layers = [InputLayer(input_shape)]
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=10,
-            init_stddev=init_stddev,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=10,
-            init_stddev=init_stddev,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=10,
-            init_stddev=init_stddev,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=10,
-            init_stddev=init_stddev,
-            activation_fun=Activation("relu")
-    ))
-    layers.append(FullyConnectedLayer(
-            layers[-1],
-            num_units=10,
-            init_stddev=init_stddev,
-            activation_fun=None
-    ))
-    layers.append(SoftmaxOutput(layers[-1]))
-    nn = NeuralNetwork(layers)
+    num_labels = 10
 
+    # Set parameters
+    init_stddev = 0.01
+    num_iterations = 30
+    descent_type = "sgd"
+    batch_size = 64 if descent_type == "sgd" else None
+    learning_rate = 0.4
+    layer_specifications = [
+        { "num_units": 600, "activation_fun": "tanh" },
+        { "num_units": num_labels, "activation_fun": None }
+    ]
+    nn = create_neural_network(layer_specifications, input_shape,
+                               init_stddev=init_stddev, seed=seed)
+
+    # Train network and measure time
     t0 = time.time()
-    nn.train(X_train, y_train, X_valid, y_valid, learning_rate=0.1,
-             max_epochs=20, batch_size=64, descent_type="gd", y_one_hot=True)
+    results = nn.train(X_train, y_train, X_valid, y_valid,
+                       learning_rate=learning_rate, max_epochs=num_iterations,
+                       batch_size=batch_size, descent_type=descent_type,
+                       y_one_hot=True)
     t1 = time.time()
     print("Duration: {:.1f}s".format(t1-t0))
 
+    # If csvfile is given, write training results into that file
+    if csvfile is not None:
+        csv_file_exists = os.path.exists(csvfile)
+        field_names = ("TrainLoss", "TrainError", "ValidError", "NumIterations",
+                       "DescentType", "LearningRate", "BatchSize", "Layers",
+                       "SubsetSize", "InitStddev", "BatchSize", "Duration")
+        with open(csvfile, "ab") as csv_file:
+            import csv
+            writer = csv.DictWriter(csv_file, field_names)
+            if not csv_file_exists:
+                writer.writeheader()
+            row_info = {
+                    "TrainLoss": "%.4f" % results[0],
+                    "TrainError": "%.4f" % results[1],
+                    "ValidError": "%.4f" % results[2],
+                    "NumIterations": num_iterations,
+                    "DescentType": descent_type,
+                    "LearningRate": learning_rate,
+                    "BatchSize": batch_size,
+                    "Layers": "[" + "|".join("%s_%s" %
+                        (spec["num_units"], spec["activation_fun"])
+                        for spec in layer_specifications) + "]",
+                    "SubsetSize": subset_size,
+                    "InitStddev": init_stddev,
+                    "Duration": "%.2f" % (t1-t0)
+            }
+            writer.writerow(row_info)
+
+    # Evaluate the neural network on the test set if flag is set
+    if evaluate_on_testset:
+        X_test, y_test = d_test
+        X_test = X_test.reshape((X_test.shape[0], -1))
+        test_error = nn.classification_error(X_test, y_test)
+        print("Test error: %.4f" % test_error)
+
 
 if __name__ == "__main__":
-    check_gradient_on_random_data()
-    # evaluate_on_mnist(True)
+    # check_gradient_on_random_data(seed=42)
+    # evaluate_on_mnist(subset_size=10000, csvfile="results.csv", seed=42)
+    evaluate_on_mnist(evaluate_on_testset=True)
 
