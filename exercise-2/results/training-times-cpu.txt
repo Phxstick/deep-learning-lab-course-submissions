@@ -1,0 +1,5 @@
+# number of filters per conv-layer | number of parameters | runtime (seconds)
+8	804760	658
+16	1609302	1003
+32	3222112	2139
+64	6461376	7691

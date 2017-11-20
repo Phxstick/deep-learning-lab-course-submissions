@@ -1,0 +1,5 @@
+# number of filters per conv-layer | number of parameters | runtime (seconds)
+8	804760	37.9
+16	1609302	48.3
+32	3222112	63.8
+64	6461376	104.5
