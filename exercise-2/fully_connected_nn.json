@@ -1,0 +1,18 @@
+{
+    "params": {
+        "optimizer": "sgd",
+        "learning_rate": 0.3,
+        "max_epochs": 10,
+        "batch_size": 64,
+        "init_stddev": 0.01
+    },
+    "layers": [
+        {
+            "type": "fully_connected",
+            "params": {
+                "num_units": 128,
+                "activation_function": "tanh"
+            }
+        }
+    ]
+}
