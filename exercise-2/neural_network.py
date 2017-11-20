@@ -5,9 +5,6 @@
     program as a command line argument in form of a json file.
     The output layer should not be included in the specification -- It is always
     assumed to be a fully connected layer applying the softmax function.
-
-    Convolutional/Pooling layers only work on the GPU, as the MNIST data is in
-    NCHW format, for which convolution/pooling is not supported on CPU yet.
 """
 
 from __future__ import print_function
@@ -25,8 +22,8 @@ def fully_connected_layer(previous_layer,
                           activation_function,
                           init_stddev):
     """ Return a tensorflow node for a fully connected layer. """
-    num_features_prev = reduce(lambda d1, d2: d1 * d2,
-                               tuple(previous_layer.shape[1:]))
+    num_features_prev = int(reduce(lambda d1, d2: d1 * d2,
+                                   tuple(previous_layer.shape[1:])))
     input_flattened = tf.reshape(previous_layer, (-1, num_features_prev))
     normal_dist = tf.distributions.Normal(0.0, init_stddev)
     W_shape = (num_features_prev, num_units)
@@ -50,20 +47,16 @@ def convolutional_layer(previous_layer,
                         init_stddev):
     """ Return a tensorflow node for a convolutional layer. """
     normal_dist = tf.distributions.Normal(0.0, init_stddev)
-    num_channels_prev = int(previous_layer.shape[1])
+    num_channels_prev = int(previous_layer.shape[-1])
     filter_shape = (filter_size, filter_size, num_channels_prev, num_filters)
     filters = tf.Variable(initial_value=normal_dist.sample(filter_shape),
                           expected_shape=filter_shape, dtype=tf.float32)
-    feature_shape_prev = tuple(previous_layer.shape[2:])
+    feature_shape_prev = tuple(previous_layer.shape[1:-1])
     padded_input = tf.pad(previous_layer, tf.constant(
-            ((0,0), (0,0)) + ((padding, padding),) * len(feature_shape_prev)))
+        ((0,0),) + ((padding, padding),) * len(feature_shape_prev) + ((0,0),)))
     result = tf.nn.convolution(padded_input, filters, padding="VALID",
-            strides=(stride,) * len(feature_shape_prev), data_format="NCHW")
-    # input_nhwc = tf.transpose(padded_input, [0, 2, 3, 1])
-    # result = tf.nn.convolution(input_nhwc, filters, padding="VALID",
-    #         strides=(stride,) * len(feature_shape_prev), data_format="NHWC")
-    # result = tf.transpose(result, [0, 3, 1, 2])
-    bias_shape = (1, num_filters) + (1,) * len(feature_shape_prev)
+            strides=(stride,) * len(feature_shape_prev), data_format="NHWC")
+    bias_shape = (1,) + (1,) * len(feature_shape_prev) + (num_filters,)
     bias = tf.Variable(initial_value=normal_dist.sample(bias_shape),
                        expected_shape=bias_shape, dtype=tf.float32)
     result = result + bias
@@ -77,15 +70,11 @@ def pooling_layer(previous_layer,
                   stride,
                   pooling_type):
     """ Return a tensorflow node for a pooling layer. """
-    feature_shape_prev = tuple(previous_layer.shape[2:])
+    feature_shape_prev = tuple(previous_layer.shape[1:-1])
     window_shape = (window_size,) * len(feature_shape_prev)
     strides = (stride,) * len(feature_shape_prev)
     result = tf.nn.pool(previous_layer, window_shape, pooling_type,
-            padding="VALID", strides=strides, data_format="NCHW")
-    # input_nhwc = tf.transpose(previous_layer, [0, 2, 3, 1])
-    # result = tf.nn.pool(input_nhwc, window_shape, pooling_type,
-    #         padding="VALID", strides=strides, data_format="NHWC")
-    # result = tf.transpose(result, [0, 3, 1, 2])
+            padding="VALID", strides=strides, data_format="NHWC")
     return result
 
 
@@ -107,7 +96,7 @@ class NeuralNetwork():
                     layer_params["activation_function"] = tf.nn.relu
                 elif layer_params["activation_function"] == "tanh":
                     layer_params["activation_function"] = tf.nn.tanh
-                else:
+                elif layer_params["activation_function"] is not None:
                     raise ValueError("Unknown activation function '%s'." %
                                      layer_params["activation_function"])
             layer_type = None
@@ -134,7 +123,7 @@ class NeuralNetwork():
         # Create optimizer
         if params["optimizer"] == "gd" or params["optimizer"] == "sgd":
             optimizer = tf.train.GradientDescentOptimizer(
-                    params["learning_rate"])
+                    float(params["learning_rate"]))
         else:
             raise ValueError("Unknown optimization method '%s'." %
                              params["optimizer"])
@@ -200,13 +189,13 @@ def train_network_on_mnist(layers, params, subset_size=None):
     if subset_size is not None:
         X_train, y_train = X_train[-subset_size:], y_train[-subset_size:]
         X_valid, y_valid = X_valid[-subset_size:], y_valid[-subset_size:]
-    X_train = np.reshape(X_train, (-1, 1, 28, 28))
-    X_valid = np.reshape(X_valid, (-1, 1, 28, 28))
-    features_shape = (1, 28, 28)
+    X_train = np.reshape(X_train, (-1, 28, 28, 1))
+    X_valid = np.reshape(X_valid, (-1, 28, 28, 1))
+    features_shape = (28, 28, 1)
     num_labels = 10
     # Create a neural network, train it and measure time
-    t0 = time.time()
     neural_network = NeuralNetwork(features_shape, num_labels, layers, params)
+    t0 = time.time()
     neural_network.train({ "train": X_train, "valid": X_valid },
                          { "train": y_train, "valid": y_valid })
     t1 = time.time()
