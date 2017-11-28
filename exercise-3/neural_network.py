@@ -99,7 +99,11 @@ class NeuralNetwork():
                 raise ValueError("Unknown layer type '%s'." %
                                  layer_spec["type"])
             previous_layer = layer_type(previous_layer, **layer_params)
-        # Create optimizer
+        # Output layer (scale values to [0,1] like the input images)
+        output_min = tf.reduce_min(previous_layer)
+        output_max = tf.reduce_max(previous_layer)
+        output = (previous_layer - output_min) / (output_max - output_min)
+        # Loss function and optimizer
         if params["optimizer"] == "gd" or params["optimizer"] == "sgd":
             optimizer = tf.train.GradientDescentOptimizer(
                     float(params["learning_rate"]))
@@ -108,14 +112,14 @@ class NeuralNetwork():
         else:
             raise ValueError("Unknown optimization method '%s'." %
                              params["optimizer"])
-        loss = tf.reduce_mean(tf.square(previous_layer - x))
+        loss = tf.reduce_mean(tf.square(output - x))
         train = optimizer.minimize(loss)
         # Store important tensorflow nodes as instance attributes
         self.nodes = {
             "x": x,
             "loss": loss,
             "train": train,
-            "output": previous_layer
+            "output": output
         }
         # Start tensorflow session and initialize parameters
         self.session = tf.Session()
@@ -156,7 +160,8 @@ class NeuralNetwork():
                 self.nodes["output"], { self.nodes["x"]: features })
 
 
-def train_network_on_mnist(layers, params, subset_size=None, output_file=None):
+def train_network_on_mnist(
+        layers, params, subset_size=None, output_file=None, noise=None):
     """ Train a neural network defined by the given layers and parameters
         on the MNIST data set (or a subset thereof).
         Visualize the result by plotting a few random input images from the
@@ -191,6 +196,10 @@ def train_network_on_mnist(layers, params, subset_size=None, output_file=None):
         num_samples = 40
         input_indices = np.random.choice(X_valid.shape[0], num_samples)
         inputs = X_valid[input_indices]
+        # Add gaussian noise with given standard deviation
+        if noise is not None:
+            inputs = np.maximum(0, np.minimum(1, inputs +
+                np.random.normal(scale=noise, size=inputs.shape)))
         outputs = neural_network.calculate_output(inputs)
         num_image_cols = 5
         num_image_rows = 8
@@ -206,7 +215,7 @@ def train_network_on_mnist(layers, params, subset_size=None, output_file=None):
             image[y:y+28,x:x+28] = inputs[i].reshape((28, 28))
             image[y:y+28,x+28:x+2*28] = outputs[i].reshape((28, 28))
         imglib.imsave(output_file, image,
-                format=os.path.splitext(output_file)[1], cmap="Greys")
+                format=os.path.splitext(output_file)[1][1:], cmap="Greys")
 
 
 if __name__ == "__main__":
@@ -219,5 +228,5 @@ if __name__ == "__main__":
         network_spec = json.load(spec_file)
         train_network_on_mnist(
                 network_spec["layers"], network_spec["params"], subset_size,
-                output_file="visualized-results.png")
+                output_file="visualized-results.png", noise=0.3)
 
