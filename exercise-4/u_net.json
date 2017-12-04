@@ -1,0 +1,259 @@
+{
+    "params": {
+        "optimizer": "adam",
+        "learning_rate": 0.0001,
+        "beta1": 0.95,
+        "beta2": 0.99,
+        "max_epochs": 3,
+        "batch_size": 1
+    },
+    "layers": [
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 32,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 32,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "id": 1
+        },
+        {
+            "type": "pooling",
+            "params": {
+                "window_size": 2,
+                "stride": 2,
+                "pooling_type": "MAX"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 64,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 64,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "id": 2
+        },
+        {
+            "type": "pooling",
+            "params": {
+                "window_size": 2,
+                "stride": 2,
+                "pooling_type": "MAX"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 128,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 128,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "id": 3
+        },
+        {
+            "type": "pooling",
+            "params": {
+                "window_size": 2,
+                "stride": 2,
+                "pooling_type": "MAX"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 256,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 256,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "id": 4
+        },
+        {
+            "type": "pooling",
+            "params": {
+                "window_size": 2,
+                "stride": 2,
+                "pooling_type": "MAX"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 512,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 512,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "transpose_convolutional",
+            "params": {
+                "num_filters": 256,
+                "filter_size": 2,
+                "stride": 2,
+                "activation_function": null
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 256,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "reuse_features_from": 1
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 256,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "transpose_convolutional",
+            "params": {
+                "num_filters": 128,
+                "filter_size": 2,
+                "stride": 2,
+                "activation_function": null
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 128,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "reuse_features_from": 2
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 128,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "transpose_convolutional",
+            "params": {
+                "num_filters": 64,
+                "filter_size": 2,
+                "stride": 2,
+                "activation_function": null
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 64,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "reuse_features_from": 3
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 64,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "transpose_convolutional",
+            "params": {
+                "num_filters": 32,
+                "filter_size": 2,
+                "stride": 2,
+                "activation_function": null
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 32,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            },
+            "reuse_features_from": 4
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 32,
+                "filter_size": 3,
+                "stride": 1,
+                "activation_function": "relu"
+            }
+        },
+        {
+            "type": "convolutional",
+            "params": {
+                "num_filters": 2,
+                "filter_size": 1,
+                "stride": 1,
+                "activation_function": null
+            }
+        }
+    ]
+}
