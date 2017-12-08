@@ -91,7 +91,7 @@ def train_network(layers, params, output_filename=None):
         input_indices = np.random.choice(X_valid.shape[0], num_samples)
         inputs = X_valid[input_indices]
         labels = -y_valid[input_indices] + 1
-        outputs = labels  # -np.argmax(neural_network.predict(inputs), axis=-1) + 1
+        outputs = -neural_network.predict(inputs) + 1
         y_spacing = 20
         x_spacing = 10
         x_size, y_size = labels_shape

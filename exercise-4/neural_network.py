@@ -100,7 +100,9 @@ class NeuralNetwork():
                 labeled_layers[layer_params["id"]] = previous_layer
         # Output layer, loss and intersection-over-union accuracy
         output = tf.nn.softmax(previous_layer)
-        loss = tf.reduce_mean(-tf.log(tf.reduce_max(output*y_one_hot, axis=-1)))
+        epsilon = 1e-8
+        loss = tf.reduce_mean(-tf.log(tf.reduce_max(output*y_one_hot, axis=-1) +
+                                      epsilon))
         predictions = tf.argmax(output, axis=-1, output_type=tf.int32)
         num_correct_predictions = \
                 tf.reduce_sum(tf.cast(tf.equal(predictions, y), tf.float32))
