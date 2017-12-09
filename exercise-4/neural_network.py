@@ -134,11 +134,24 @@ class NeuralNetwork():
         init = tf.global_variables_initializer()
         self.session.run(init)
 
-    def train(self, features, labels):
+    def train(self, data):
         """ Train the neural network and print evaluation results on the
             training and validation set in each iteration.
+
+            The given data object must have two methods:
+            - "get_train_image_list_and_label_list": returns a tuple of images
+              and labels (X, y) to be used for training. This function will
+              be called once at the beginning of every training step.
+            - "get_test_image_list_and_label_list": returns a tuple of images
+              and labels (X, y) to be used for validation.
         """
+        X_valid, y_valid = data.get_test_image_list_and_label_list()
+        features = { "valid": X_valid }
+        labels = { "valid": y_valid }
         for step in range(1, self.params["max_epochs"] + 1):
+            X_train, y_train = data.get_train_image_list_and_label_list()
+            features["train"] = X_train
+            labels["train"] = y_train
             if self.params["optimizer"] == "sgd" or \
                     self.params["optimizer"] == "adam": 
                 n_samples = features["train"].shape[0]

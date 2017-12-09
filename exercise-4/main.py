@@ -25,7 +25,7 @@ class Data:
         self.offset = (300 - 116) // 2
   
     def get_train_image_list_and_label_list(self):
-        """ Return training images and labels of size self.input_resolution. """
+        """ Return a training image and label. """
         n = random.randint(0, len(self.train_images) - 1)
         x = random.randint(0,
                 (self.train_images[n].shape)[1] - self.input_resolution - 1)
@@ -40,7 +40,7 @@ class Data:
         return np.stack([image]), np.stack([label])
   
     def get_test_image_list_and_label_list(self):
-        """ Return test images and labels of size self.input_resolution. """
+        """ Return test images and labels. """
         coord_list = [[0,0], [0, 116], [0, 232], 
                       [116,0], [116, 116], [116, 232],
                       [219,0], [219, 116], [219, 232]]
@@ -66,7 +66,6 @@ def train_network(layers, params, output_filename=None):
         validation set and plot them into the file specified by given name.
     """
     data = Data()
-    X_train, y_train = data.get_train_image_list_and_label_list()
     X_valid, y_valid = data.get_test_image_list_and_label_list()
     features_shape = (300, 300, 1)
     labels_shape = (116, 116)
@@ -75,8 +74,7 @@ def train_network(layers, params, output_filename=None):
     neural_network = NeuralNetwork(
             features_shape, labels_shape, num_labels, layers, params)
     t0 = time.time()
-    neural_network.train({ "train": X_train, "valid": X_valid },
-                         { "train": y_train, "valid": y_valid })
+    neural_network.train(data)
     t1 = time.time()
     print("Duration: %.1fs" % (t1 - t0))
     # Visualize results on a few random samples of the validation set
